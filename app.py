@@ -1,3 +1,5 @@
+import logging
+from datetime import datetime
 import os
 import json
 import gspread
@@ -8,7 +10,7 @@ from flask_cors import CORS
 # --- SETUP ---
 app = Flask(__name__)
 CORS(app) # This one line solves all our CORS problems.
-
+logging.basicConfig(level=logging.INFO)
 # --- GOOGLE SHEETS AUTHENTICATION ---
 # This requires a 'credentials.json' file from a Google Cloud Service Account.
 # We will set this up in the next steps.
@@ -67,10 +69,16 @@ def get_products():
 def submit_feedback():
     try:
         data = request.json
+        app.logger.info(f"Received feedback data: {data}") # New log line
+
         ai_analysis = analyze_with_gemini(f"Feedback: {data['feedbackText']}. Suggestion: {data['suggestionText']}")
+        app.logger.info(f"AI Analysis result: {ai_analysis}") # New log line
+
+        # A much more reliable way to get a timestamp
+        timestamp = datetime.utcnow().isoformat() + "Z" 
         
         new_row = [
-            requests.get('http://worldtimeapi.org/api/ip').json()['datetime'], # Get a timestamp
+            timestamp,
             data.get('productName'),
             data.get('feedbackText'),
             data.get('suggestionText'),
@@ -80,9 +88,15 @@ def submit_feedback():
             ai_analysis['sentiment'],
             ai_analysis['error']
         ]
+        
+        app.logger.info(f"Appending new row: {new_row}") # New log line
         feedback_sheet.append_row(new_row)
+        
         return jsonify({"status": "success", "message": "Feedback submitted."})
+        
     except Exception as e:
+        # This will now log the detailed error traceback to the Render console
+        app.logger.error("An error occurred in /submit-feedback", exc_info=True)
         return jsonify({"status": "error", "message": str(e)}), 500
         
 @app.route('/admin-login', methods=['POST'])
