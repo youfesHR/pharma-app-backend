@@ -3,3 +3,4 @@ Flask-Cors
 gspread
 requests
 oauth2client
+python-docx

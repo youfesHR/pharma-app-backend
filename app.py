@@ -4,7 +4,9 @@ import logging
 from datetime import datetime
 import gspread
 import requests
-from flask import Flask, request, jsonify
+import docx
+from io import BytesIO
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 
 # --- SETUP ---
@@ -37,7 +39,7 @@ except Exception as e:
     app.logger.error(f"FATAL: Could not connect to Google Sheets. Check credentials/sharing. Error: {e}", exc_info=True)
 
 
-# --- GEMINI AI FUNCTION ---
+# --- GEMINI HELPER FUNCTIONS ---
 def analyze_with_gemini(text):
     if not GEMINI_API_KEY:
         return {"category": "Config Error", "sentiment": 0, "error": "GEMINI_API_KEY not set."}
@@ -50,7 +52,7 @@ def analyze_with_gemini(text):
 
     try:
         response = requests.post(url, json=payload, headers=headers)
-        response.raise_for_status() # Raises an exception for bad responses (4xx or 5xx)
+        response.raise_for_status()
         
         json_response = response.json()
         model_response_text = json_response['candidates'][0]['content']['parts'][0]['text']
@@ -61,6 +63,23 @@ def analyze_with_gemini(text):
     except Exception as e:
         app.logger.error(f"Gemini API Error: {e}", exc_info=True)
         return {"category": "AI_Error", "sentiment": 0, "error": str(e)}
+
+def generate_text_with_gemini(prompt):
+    if not GEMINI_API_KEY:
+        return "Error: GEMINI_API_KEY not set."
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    headers = {'Content-Type': 'application/json'}
+
+    try:
+        response = requests.post(url, json=payload, headers=headers)
+        response.raise_for_status()
+        json_response = response.json()
+        return json_response['candidates'][0]['content']['parts'][0]['text']
+    except Exception as e:
+        app.logger.error(f"Gemini text generation error: {e}", exc_info=True)
+        return "Error: Could not generate report text from AI."
 
 
 # --- API ENDPOINTS (ROUTES) ---
@@ -110,10 +129,58 @@ def get_all_feedback():
         app.logger.error("An error occurred in /get-all-feedback", exc_info=True)
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# --- NEW ENDPOINT FOR REPORT GENERATION ---
+@app.route('/generate-report', methods=['GET'])
+def generate_report():
+    try:
+        app.logger.info("Report generation started.")
+        all_feedback = feedback_sheet.get_all_records()
+        if not all_feedback:
+            return jsonify({"status": "error", "message": "No feedback data to generate a report."}), 404
+
+        data_summary_for_prompt = "\n".join([str(item) for item in all_feedback])
+        report_prompt = f"""
+        You are a senior business analyst for a pharmaceutical company. Your task is to write a concise, professional executive summary report based on the following raw customer feedback data. The report must be in English and should include these sections:
+        1. **Overall Summary:** A brief, high-level overview of the findings.
+        2. **Key Positive Themes:** What are customers consistently happy about?
+        3. **Key Areas for Improvement:** What are the most common complaints? Group similar issues.
+        4. **Actionable Recommendations:** Suggest 2-3 specific, concrete actions the company should take.
+
+        Do not just list the data. Synthesize it into an insightful report.
+        --- RAW DATA ---
+        {data_summary_for_prompt}
+        --- END OF RAW DATA ---
+        """
+        
+        app.logger.info("Sending data to Gemini for report generation...")
+        generated_report_text = generate_text_with_gemini(report_prompt)
+        app.logger.info("Report text received from Gemini.")
+
+        document = docx.Document()
+        document.add_heading('Customer Feedback Report', level=0)
+        for paragraph in generated_report_text.split('\n'):
+            if paragraph.strip():
+                document.add_paragraph(paragraph)
+
+        file_stream = BytesIO()
+        document.save(file_stream)
+        file_stream.seek(0)
+
+        app.logger.info("Word document created. Sending file...")
+        return send_file(
+            file_stream,
+            as_attachment=True,
+            download_name='Pharma_Feedback_Report.docx',
+            mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        )
+
+    except Exception as e:
+        app.logger.error("An error occurred in /generate-report", exc_info=True)
+        return jsonify({"status": "error", "message": "Could not generate report."}), 500
+
+
 # --- START THE SERVER ---
 # This block must be the very last thing in the file.
 if __name__ == '__main__':
-    # The 'port' is provided by Render, so we read it from the environment.
     port = int(os.environ.get('PORT', 8080))
-    # 'host' must be '0.0.0.0' to be reachable externally.
     app.run(host='0.0.0.0', port=port)
