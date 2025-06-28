@@ -129,24 +129,35 @@ def get_all_feedback():
         app.logger.error("An error occurred in /get-all-feedback", exc_info=True)
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# --- NEW ENDPOINT FOR REPORT GENERATION ---
+# --- MODIFIED ENDPOINT FOR REPORT GENERATION ---
 @app.route('/generate-report', methods=['GET'])
 def generate_report():
     try:
         app.logger.info("Report generation started.")
+        # Get language from query parameter, default to English
+        lang = request.args.get('lang', 'english')
+        app.logger.info(f"Report language requested: {lang}")
+        
         all_feedback = feedback_sheet.get_all_records()
         if not all_feedback:
             return jsonify({"status": "error", "message": "No feedback data to generate a report."}), 404
 
         data_summary_for_prompt = "\n".join([str(item) for item in all_feedback])
+        
+        # The prompt now includes the language variable
         report_prompt = f"""
-        You are a senior business analyst for a pharmaceutical company. Your task is to write a concise, professional executive summary report based on the following raw customer feedback data. The report must be in English and should include these sections:
+        You are a senior business analyst for a pharmaceutical company.
+        Your task is to write a concise, professional executive summary report based on the following raw customer feedback data.
+
+        IMPORTANT: The entire report must be written in {lang}.
+
+        The report should include these sections:
         1. **Overall Summary:** A brief, high-level overview of the findings.
         2. **Key Positive Themes:** What are customers consistently happy about?
         3. **Key Areas for Improvement:** What are the most common complaints? Group similar issues.
         4. **Actionable Recommendations:** Suggest 2-3 specific, concrete actions the company should take.
 
-        Do not just list the data. Synthesize it into an insightful report.
+        Do not just list the data. Synthesize it into an insightful report in {lang}.
         --- RAW DATA ---
         {data_summary_for_prompt}
         --- END OF RAW DATA ---
@@ -167,10 +178,11 @@ def generate_report():
         file_stream.seek(0)
 
         app.logger.info("Word document created. Sending file...")
+        # The downloaded filename is now dynamic based on the language
         return send_file(
             file_stream,
             as_attachment=True,
-            download_name='Pharma_Feedback_Report.docx',
+            download_name=f'Pharma_Feedback_Report_{lang}.docx',
             mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         )
 
