@@ -113,7 +113,6 @@ def admin_login():
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
-    
 @app.route('/get-all-feedback', methods=['GET'])
 def get_all_feedback():
     try:
@@ -122,4 +121,9 @@ def get_all_feedback():
         return jsonify({"status": "success", "feedback": all_feedback})
     except Exception as e:
         app.logger.error("An error occurred in /get-all-feedback", exc_info=True)
-        return jsonify({"status": "error", "message": str(e)}), 500    
+        return jsonify({"status": "error", "message": str(e)}), 500     
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    
+   
